@@ -1,5 +1,5 @@
 description = [[
-      Looks for text editor backups and swap files of CMS configuration files. Same backup-names engine as http-backup-finder.nse
+      Looks for text editor backups and swap files of CMS configuration files, e.g. "wp-config.php~"
 ]]
 
 ---
@@ -16,6 +16,7 @@ description = [[
 -- |_  http://example.com/config copy.php
 --
 -- @args http-config-backup.base the path where the CMS is installed
+-- @args http-config-backup.save save all the valid config files found
 --
 
 author = "Riccardo Cecolin"
@@ -28,6 +29,9 @@ require 'url'
 
 portrule = shortport.http
 
+---
+--Creates combinations of backup names for a given filename
+--Taken from: http-backup-finder.nse
 local function backupNames(filename)
    local function createBackupNames()
       local dir = filename:match("^(.*/)") or ""
@@ -63,6 +67,22 @@ local function backupNames(filename)
    return coroutine.wrap(createBackupNames)
 end
 
+---
+--Writes string to file
+--Taken from: hostmap.nse
+-- @param filename Filename to write
+-- @param contents Content of file
+-- @return True if file was written successfully
+local function write_file(filename, contents)
+  local f, err = io.open(filename, "w")
+  if not f then
+    return f, err
+  end
+  f:write(contents)
+  f:close()
+  return true
+end
+
 encode = function (val)
 	    -- escape just the needed characters
 	    local patterns = {
@@ -75,12 +95,12 @@ encode = function (val)
 action = function(host, port)
 	    
 	    local configs = { 
-	       "wp-config.php", -- WordPress
-	       "config.php", -- phpBB, ExpressionEngine
-	       "configuration.php", -- Joomla
-	       "LocalSettings.php", -- MediaWiki
-	       "mt-config.cgi", -- Movable Type
-	       "settings.php", -- Drupal
+	       ["wp-config.php"] = "<?php", -- WordPress
+	       ["config.php"] = "<?php", -- phpBB, ExpressionEngine
+	       ["configuration.php"] = "<?php", -- Joomla
+	       ["LocalSettings.php"] = "<?php", -- MediaWiki
+	       ["mt-config.cgi"] = "CGIPath", -- Movable Type
+	       ["settings.php"] = "<?php",  -- Drupal
 	    }
 	    
 	    local backups = {}
@@ -90,21 +110,40 @@ action = function(host, port)
 	       base = "/"
 	    end
 
+	    local save = stdnse.get_script_args("http-config-backup.save")
+
 	    if not base:match("^/") then base = "/".. base end
 	    if not base:match("/$") then base = base .."/" end
 	    	    
 	    -- for each config file
-	    for _, cfg in ipairs(configs) do
+	    for cfg, regx in pairs(configs) do
 	       -- for each alteration of the filename
 	       for entry in backupNames(cfg) do
 		  local path = base .. entry
 		  local escaped_path = path:gsub("[ #]", encode)
 		  
-		  -- head http request
-		  local response = http.head(host, port, escaped_path)
+		  -- http request
+		  local response = http.get(host, port, escaped_path)
 		  
 		  if ( response.status == 200 ) then
-		     table.insert(backups, ("http://%s%s"):format(host.targetname or host.ip, path))
+		     -- check it if is valid before inserting
+		     if response.body:match(regx) then
+			local filename = ((host.targetname or host.ip) .. path):gsub("/","-")
+
+			-- save the content
+			if save then
+			   local status, err = write_file(filename, response.body)
+			   if status then
+			      stdnse.print_debug(1,"%s saved", filename)
+			   else
+			      stdnse.print_debug(1,"error saving %s", err)
+			   end
+			end
+
+			table.insert(backups, ("http://%s%s"):format(host.targetname or host.ip, path))
+		     else
+			stdnse.print_debug(1, "found but not matching: http://%s%s", host.targetname or host.ip, path)
+		     end
 		  end
 	       end
 	    end
