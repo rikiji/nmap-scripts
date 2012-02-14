@@ -108,7 +108,8 @@ action = function(host, port)
 	    
 	    local backups = {}
 
-	    local base = tostring(stdnse.get_script_args("http-config-backup.base"))
+	    local base = stdnse.get_script_args("http-config-backup.base")
+
 	    if not base then
 	       base = "/"
 	    end
@@ -141,8 +142,8 @@ action = function(host, port)
 			   else
 			      stdnse.print_debug(1,"error saving %s", err)
 			   end
-			end
-
+			end			
+			
 			table.insert(backups, ("http://%s%s"):format(host.targetname or host.ip, path))
 		     else
 			stdnse.print_debug(1, "found but not matching: http://%s%s", host.targetname or host.ip, path)
